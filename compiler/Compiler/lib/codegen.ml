@@ -147,7 +147,7 @@ let rec gen_expr ctx expr =
     match expr with
     | IntLit n -> 
         let (ctx, reg) = alloc_temp_reg ctx in
-        (ctx, Printf.sprintf " \n   li %s, %d" reg n, reg)
+        (ctx, Printf.sprintf "  \n li %s, %d" reg n, reg)
     | Var name ->
         let offset = get_var_offset ctx name in
         let (ctx, reg) = alloc_temp_reg ctx in
@@ -172,7 +172,7 @@ let rec gen_expr ctx expr =
         | Or  -> Printf.sprintf "or %s, %s, %s" reg_dest reg1 reg2
         in
         (* 释放临时寄存器 *)
-        let ctx = free_temp_reg (free_temp_reg ctx) in
+     let ctx = free_temp_reg (free_temp_reg ctx) in
         (ctx, asm1 ^ "\n" ^ asm2 ^ "\n" ^ instr, reg_dest)
     | UnOp (op, e) ->
         let (ctx, asm, reg) = gen_expr ctx e in
@@ -182,7 +182,7 @@ let rec gen_expr ctx expr =
         | UMinus -> Printf.sprintf "neg %s, %s" reg_dest reg
         | Not    -> Printf.sprintf "seqz %s, %s" reg_dest reg
         in
-        let ctx = free_temp_reg ctx in
+     let ctx = free_temp_reg ctx in  (* 释放源寄存器 *)
         (ctx, asm ^ "\n" ^ instr, reg_dest)
 | FuncCall (name, args) ->
       (* 先计算所有参数表达式，不调整栈指针 *)
@@ -253,9 +253,8 @@ let rec gen_expr ctx expr =
                 restore_temps_asm ^ "\n" ^ restore_stack_asm ^ "\n" ^ 
                 move_result in
       
-      (* 释放参数使用的临时寄存器 *)
       let ctx = List.fold_left (fun ctx _ -> free_temp_reg ctx) ctx arg_regs in
-      (ctx, asm, reg_dest)
+        (ctx, asm, reg_dest)
 
 (* 生成参数代码 - 返回参数寄存器列表 *)
 and gen_args ctx args =
@@ -303,7 +302,7 @@ and gen_stmt ctx stmt =
         let asm = expr_asm ^ Printf.sprintf "\n    sw %s, %d(sp)" reg offset in
         (free_temp_reg ctx, asm)
     
-    | If (cond, then_stmt, else_stmt) ->
+     | If (cond, then_stmt, else_stmt) ->
         let (ctx, cond_asm, cond_reg) = gen_expr ctx cond in
         let (ctx, then_label) = fresh_label ctx "if_then" in
         let (ctx, else_label) = fresh_label ctx "if_else" in
@@ -319,11 +318,12 @@ and gen_stmt ctx stmt =
                 Printf.sprintf "\n    j %s" then_label ^
                 Printf.sprintf "\n%s:" else_label ^
                 else_asm ^
-                Printf.sprintf "\n    j %s" end_label ^
+                Printf.sprintf "\n    j %s" end_label ^  (* 添加跳转结束 *)
                 Printf.sprintf "\n%s:" then_label ^
                 then_asm ^
+                Printf.sprintf "\n    j %s" end_label ^  (* 关键修复：添加跳转结束 *)
                 Printf.sprintf "\n%s:" end_label in
-        (free_temp_reg ctx, asm)
+        (free_temp_reg ctx, asm)  (* 释放条件寄存器 *)
     
     | While (cond, body) ->
         let (ctx, begin_label) = fresh_label ctx "loop_begin" in
