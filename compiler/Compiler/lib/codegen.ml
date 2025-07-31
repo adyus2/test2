@@ -50,11 +50,11 @@ let create_context func_name =
 (* 栈对齐常量 *)
 let stack_align = 16
 
-(* 获取唯一标签 *)
+(* 获取唯一标签 - 使用函数名作为前缀 *)
 let fresh_label ctx prefix =
     let n = ctx.label_counter in
     { ctx with label_counter = n + 1 }, 
-    Printf.sprintf ".L%s%d" prefix n
+    Printf.sprintf ".L%s_%s%d" ctx.current_func prefix n  (* 添加函数名前缀 *)
 
 (* 获取变量偏移量 - 支持嵌套作用域查找 *)
 let get_var_offset ctx name =
@@ -131,7 +131,7 @@ let gen_epilogue ctx =
         (* 关键修复：偏移量计算与保存时完全匹配 *)
         List.mapi (fun i reg ->
             let offset = (List.length ctx.saved_regs * 4) - (i * 4) in
-            Printf.sprintf "    lw %s, %d(sp)" reg offset
+            Printf.sprintf " \n   lw %s, %d(sp)" reg offset
         ) restore_list
         |> String.concat "\n"
     in
@@ -151,7 +151,7 @@ let rec gen_expr ctx expr =
     | Var name ->
         let offset = get_var_offset ctx name in
         let (ctx, reg) = alloc_temp_reg ctx in
-        (ctx, Printf.sprintf "    lw %s, %d(sp)" reg offset, reg)
+        (ctx, Printf.sprintf "  \n  lw %s, %d(sp)" reg offset, reg)
     | BinOp (e1, op, e2) ->
         let (ctx, asm1, reg1) = gen_expr ctx e1 in
         let (ctx, asm2, reg2) = gen_expr ctx e2 in
@@ -232,7 +232,7 @@ let rec gen_expr ctx expr =
       (* 恢复临时寄存器 *)
       let restore_temps_asm = 
         List.init 7 (fun i -> 
-          Printf.sprintf "    lw t%d, %d(sp)" i (i * 4))
+          Printf.sprintf " \n   lw t%d, %d(sp)" i (i * 4))
         |> String.concat "\n"
       in
       
@@ -370,7 +370,6 @@ and gen_stmt ctx stmt =
         (* 关键修复：在返回语句后直接跳转到函数结尾 *)
         let epilogue_asm = gen_epilogue ctx in
         (free_temp_reg ctx, expr_asm ^ "\n" ^ epilogue_asm)
-    
     | EmptyStmt -> (ctx, "")
     | ExprStmt e -> 
         let (ctx, asm, _) = gen_expr ctx e in 
@@ -407,7 +406,7 @@ let gen_function func =
                     (* 关键修复：栈传递参数在调用者栈帧中，不在当前栈帧 *)
                     let stack_offset = (index - 8) * 4 in  (* 移除ctx.frame_size *)
                     let (_, reg) = alloc_temp_reg ctx in  (* 使用临时寄存器 *)
-                    let load_asm = Printf.sprintf "    lw %s, %d(sp)\n" reg stack_offset in
+                    let load_asm = Printf.sprintf "  \n  lw %s, %d(sp)\n" reg stack_offset in
                     let store_asm = Printf.sprintf "    sw %s, %d(sp)" reg offset in
                     gen_save rest (index + 1) 
                         (asm ^ load_asm ^ store_asm ^ "\n")
