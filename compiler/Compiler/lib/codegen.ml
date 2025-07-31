@@ -147,7 +147,7 @@ let rec gen_expr ctx expr =
     match expr with
     | IntLit n -> 
         let (ctx, reg) = alloc_temp_reg ctx in
-        (ctx, Printf.sprintf "    li %s, %d" reg n, reg)
+        (ctx, Printf.sprintf " \n   li %s, %d" reg n, reg)
     | Var name ->
         let offset = get_var_offset ctx name in
         let (ctx, reg) = alloc_temp_reg ctx in
