@@ -147,7 +147,7 @@ let rec gen_expr ctx expr =
     match expr with
     | IntLit n -> 
         let (ctx, reg) = alloc_temp_reg ctx in
-        (ctx, Printf.sprintf " \n   li %s, %d" reg n, reg)
+        (ctx, Printf.sprintf "    li %s, %d" reg n, reg)
     | Var name ->
         let offset = get_var_offset ctx name in
         let (ctx, reg) = alloc_temp_reg ctx in
@@ -196,7 +196,7 @@ let rec gen_expr ctx expr =
       (* 调整栈指针 *)
       let stack_adj_asm = 
         if aligned_temp_space > 0 then 
-          Printf.sprintf " \n   addi sp, sp, -%d\n" aligned_temp_space
+          Printf.sprintf "  \n  addi sp, sp, -%d\n" aligned_temp_space
         else ""
       in
       
@@ -239,7 +239,7 @@ let rec gen_expr ctx expr =
       (* 恢复栈指针 *)
       let restore_stack_asm = 
         if aligned_temp_space > 0 then 
-          Printf.sprintf "    addi sp, sp, %d" aligned_temp_space
+          Printf.sprintf "  \n  addi sp, sp, %d" aligned_temp_space
         else ""
       in
       
