@@ -1,4 +1,5 @@
 open Ast
+
 (* 寄存器分类 *)
 type reg_type = 
   | CallerSaved   (* 调用者保存寄存器 *)
@@ -10,7 +11,7 @@ type context = {
     current_func: string;          (* 当前函数名 *)
     local_offset: int;             (* 局部变量区当前偏移量 *)
     frame_size: int;               (* 栈帧总大小（计算后设置） *)
-    var_offset: (string, int) Hashtbl.t; (* 变量名 -> 栈偏移量 *)
+    var_offset: (string * int) list list; (* 符号表栈：每个作用域是一个(string*int)的列表 *)
     next_temp: int;                (* 下一个临时寄存器编号 *)
     label_counter: int;            (* 标签计数器 *)
     loop_stack: (string * string) list; (* 循环标签栈 (begin_label, end_label) *)
@@ -36,7 +37,7 @@ let create_context func_name =
     { current_func = func_name;
       local_offset = 0;
       frame_size = 0;
-      var_offset = Hashtbl.create 16;
+      var_offset = [[]];  (* 初始化为一个作用域（空列表） *)
       next_temp = 0;
       label_counter = 0;
       loop_stack = [];
@@ -55,17 +56,31 @@ let fresh_label ctx prefix =
     { ctx with label_counter = n + 1 }, 
     Printf.sprintf ".L%s%d" prefix n
 
-(* 获取变量偏移量 *)
+(* 获取变量偏移量 - 支持嵌套作用域查找 *)
 let get_var_offset ctx name =
-    try Hashtbl.find ctx.var_offset name
-    with Not_found -> 
-        failwith (Printf.sprintf "Undefined variable: %s" name)
+    let rec search = function
+        | [] -> None
+        | scope :: rest -> 
+            try Some (List.assoc name scope)
+            with Not_found -> search rest
+    in
+    match search ctx.var_offset with
+    | Some offset -> offset
+    | None -> failwith (Printf.sprintf "Undefined variable: %s" name)
 
-(* 添加变量到符号表 *)
+(* 添加变量到当前作用域 *)
 let add_var ctx name size =
-    let offset = ctx.saved_area_size + ctx.local_offset in
-    Hashtbl.add ctx.var_offset name offset;
-    { ctx with local_offset = ctx.local_offset + size }
+    match ctx.var_offset with
+    | current_scope :: rest_scopes ->
+        let offset = ctx.saved_area_size + ctx.local_offset in
+        (* 将新绑定添加到当前作用域 *)
+        let new_scope = (name, offset) :: current_scope in
+        (* 更新当前作用域，并更新局部偏移量 *)
+        { ctx with 
+            var_offset = new_scope :: rest_scopes;
+            local_offset = ctx.local_offset + size 
+        }
+    | [] -> failwith "No active scope"
 
 (* 分配临时寄存器 *)
 let alloc_temp_reg ctx =
@@ -104,6 +119,8 @@ let gen_prologue ctx func =
 %s
 " func.name func.name total_size save_regs_asm in
     (asm, { ctx with frame_size = total_size })
+
+(* 函数结语生成 *)
 let gen_epilogue ctx =
     (* 生成恢复寄存器的汇编代码 - 逆序恢复：先恢复ra，然后s11-s0 *)
     let restore_regs_asm = 
@@ -245,14 +262,27 @@ and gen_args ctx args _temp_space =
     
     process_args ctx "" 0 args
 
+(* 处理语句列表的辅助函数 *)
+let rec gen_stmts ctx stmts =
+    List.fold_left (fun (ctx, asm) stmt ->
+        let (ctx', stmt_asm) = gen_stmt ctx stmt in
+        (ctx', asm ^ "\n" ^ stmt_asm)
+    ) (ctx, "") stmts
+
 (* 语句代码生成 *)
-let rec gen_stmt ctx stmt =
+and gen_stmt ctx stmt =
     match stmt with
     | Block stmts ->
-        List.fold_left (fun (ctx, asm) s ->
-            let (ctx, s_asm) = gen_stmt ctx s in
-            (ctx, asm ^ "\n" ^ s_asm)
-        ) (ctx, "") stmts
+        (* 进入新作用域：压入一个新的空作用域 *)
+        let new_ctx = { ctx with var_offset = [] :: ctx.var_offset } in
+        let (ctx_after, asm) = gen_stmts new_ctx stmts in
+        (* 离开作用域：弹出当前作用域 *)
+        let popped_ctx = 
+            match ctx_after.var_offset with
+            | _ :: outer_scopes -> { ctx_after with var_offset = outer_scopes }
+            | [] -> failwith "Scope stack underflow"
+        in
+        (popped_ctx, asm)
     
     | VarDecl (name, expr) ->
         let (ctx, expr_asm, reg) = gen_expr ctx expr in
@@ -378,8 +408,12 @@ let gen_function func =
         gen_save func.params 0 ""
     in
     
-    (* 生成函数体 *)
-    let (_, body_asm) = gen_stmt ctx func.body in
+    (* 生成函数体：直接处理语句列表（不额外添加作用域） *)
+    let (_, body_asm) = 
+        match func.body with
+        | Block stmts -> gen_stmts ctx stmts
+        | _ -> gen_stmt ctx func.body
+    in
     
     (* 生成函数结语 *)
     let epilogue_asm = gen_epilogue ctx in
