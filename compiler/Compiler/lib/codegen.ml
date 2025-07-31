@@ -192,7 +192,7 @@ let rec gen_expr ctx expr =
         let (ctx, arg_asm, _arg_count) = gen_args ctx args aligned_temp_space in
         
         (* 函数调用 *)
-        let call_asm = Printf.sprintf "    call %s" name in
+        let call_asm = Printf.sprintf "    \n    call %s\n" name in
         
         (* 恢复临时寄存器 *)
         let restore_temps_asm = 
@@ -224,20 +224,21 @@ and gen_args ctx args _temp_space =
         | arg::rest when count < 8 ->  (* 前8个参数使用寄存器 *)
             let (ctx, arg_asm, reg) = gen_expr ctx arg in
             let target_reg = Printf.sprintf "a%d" count in
+            (* 关键修复：确保每条指令独立成行 *)
             let new_asm = 
                 if reg = target_reg then 
-                    asm ^ arg_asm 
+                    asm ^ arg_asm ^ "\n"  (* 添加换行 *)
                 else 
-                    asm ^ arg_asm ^ Printf.sprintf "\n    mv %s, %s" target_reg reg
+                    asm ^ arg_asm ^ Printf.sprintf "\n    mv %s, %s\n" target_reg reg
             in
-            let ctx = free_temp_reg ctx in  (* 释放表达式寄存器 *)
+            let ctx = free_temp_reg ctx in
             process_args ctx new_asm (count + 1) rest
         | arg::rest ->  (* 额外参数使用栈传递 *)
             (* 栈传递参数位置：临时空间基址 + 28(临时寄存器区) + (count-8)*4 *)
             let stack_offset = 28 + (count - 8) * 4 in
             let (ctx, arg_asm, reg) = gen_expr ctx arg in
-            let new_asm = asm ^ arg_asm ^ 
-                         Printf.sprintf "\n    sw %s, %d(sp)" reg stack_offset in
+    let new_asm = asm ^ arg_asm ^ 
+                         Printf.sprintf "\n    sw %s, %d(sp)\n" reg stack_offset in  (* 添加换行 *)
             let ctx = free_temp_reg ctx in  (* 释放表达式寄存器 *)
             process_args ctx new_asm (count + 1) rest
     in
