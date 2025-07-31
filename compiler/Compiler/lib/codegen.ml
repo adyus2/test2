@@ -358,7 +358,7 @@ and gen_stmt ctx stmt =
             (ctx, Printf.sprintf "    j %s" begin_label)
         | [] -> failwith "continue outside loop")
     
-    | Return expr_opt ->
+  | Return expr_opt ->
         let (ctx, expr_asm, _reg) = 
             match expr_opt with
             | Some expr -> 
@@ -367,7 +367,9 @@ and gen_stmt ctx stmt =
                 else (ctx, asm ^ Printf.sprintf "\n    mv a0, %s" r, "a0")
             | None -> (ctx, "", "a0")
         in
-        (free_temp_reg ctx, expr_asm)
+        (* 关键修复：在返回语句后直接跳转到函数结尾 *)
+        let epilogue_asm = gen_epilogue ctx in
+        (free_temp_reg ctx, expr_asm ^ "\n" ^ epilogue_asm)
     
     | EmptyStmt -> (ctx, "")
     | ExprStmt e -> 
