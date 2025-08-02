@@ -35,7 +35,7 @@ let create_context func_name =
         ("t0", TempReg); ("t1", TempReg); ("t2", TempReg); ("t3", TempReg);
         ("t4", TempReg); ("t5", TempReg); ("t6", TempReg)
     ] in
-    (* 初始保存区域大小：RA(4字节) + 所有被调用者保存寄存器(12*4=48字节) *)
+    (* 初始保存区域大小：RA(4字节) + 所有被调用者保存寄存器(12 * 4=48字节) *)
     { current_func = func_name;
       local_offset = 0;
       frame_size = 0;
@@ -47,9 +47,9 @@ let create_context func_name =
       reg_map = reg_map;
       param_count = 0;
       temp_regs_used = 0;
-      saved_area_size = 52; (* 4(ra) + 12*4(regs) = 52 *)
+      saved_area_size = 52; (* 4(ra) + 12 * 4(regs) = 52 *)
       spill_offset = 0;     (* 初始化溢出偏移 *)
-      max_temp_regs = 7 }   (* 只使用t0-t6，s0-s11保留用于特殊用途 *)
+      max_temp_regs = 7 }   (* 只使用t0-t6 *)
 
 (* 栈对齐常量 *)
 let stack_align = 16
@@ -120,17 +120,16 @@ let gen_prologue ctx func =
     let save_regs_asm = 
         let save_instrs = 
             List.mapi (fun i reg -> 
-                Printf.sprintf "  \n  sw %s, %d(sp)" reg (i * 4)
+                Printf.sprintf "\n    sw %s, %d(sp)" reg (i * 4)
             ) ctx.saved_regs
-            @ [Printf.sprintf "   \n sw ra, %d(sp)" (List.length ctx.saved_regs * 4)]
+            @ [Printf.sprintf "\n    sw ra, %d(sp)" (List.length ctx.saved_regs * 4)]
         in
-        String.concat "\n" save_instrs
+        String.concat "" save_instrs
     in
     let asm = Printf.sprintf "
     .globl %s
 %s:
-    addi sp, sp, -%d
-%s
+    addi sp, sp, -%d%s
 " func.name func.name total_size save_regs_asm in
     (asm, { ctx with frame_size = total_size })
 
@@ -145,22 +144,18 @@ let gen_epilogue ctx =
         (* 关键修复：偏移量计算与保存时完全匹配 *)
         List.mapi (fun i reg ->
             let offset = (List.length ctx.saved_regs * 4) - (i * 4) in
-            Printf.sprintf "  \n  lw %s, %d(sp)" reg offset
+            Printf.sprintf "\n    lw %s, %d(sp)" reg offset
         ) restore_list
-        |> String.concat "\n"
+        |> String.concat ""
     in
     
-    Printf.sprintf "
-%s
-    addi sp, sp, %d
-    ret
-" restore_regs_asm ctx.frame_size
+    Printf.sprintf "%s\n    addi sp, sp, %d\n    ret" restore_regs_asm ctx.frame_size
 
 (* 处理栈位置：如果是栈位置则加载到寄存器 *)
 let handle_stack_location ctx reg =
     if String.contains reg '(' then
         let (ctx, temp_reg) = alloc_temp_reg ctx in
-        (ctx, Printf.sprintf "   \n lw %s, %s" temp_reg reg, temp_reg)
+        (ctx, Printf.sprintf "\n    lw %s, %s" temp_reg reg, temp_reg)
     else
         (ctx, "", reg)
 
@@ -171,18 +166,18 @@ let rec gen_expr ctx expr =
         let (ctx, reg) = alloc_temp_reg ctx in
         if String.contains reg '(' then
             let (ctx, temp_reg) = alloc_temp_reg ctx in
-            (ctx, Printf.sprintf "   \n li %s, %d\n    sw %s, %s" temp_reg n temp_reg reg, reg)
+            (ctx, Printf.sprintf "\n    li %s, %d\n    sw %s, %s" temp_reg n temp_reg reg, reg)
         else
-            (ctx, Printf.sprintf " \n   li %s, %d" reg n, reg)
+            (ctx, Printf.sprintf "\n    li %s, %d" reg n, reg)
     
     | Var name ->
         let offset = get_var_offset ctx name in
         let (ctx, reg) = alloc_temp_reg ctx in
         if String.contains reg '(' then
             let (ctx, temp_reg) = alloc_temp_reg ctx in
-            (ctx, Printf.sprintf " \n   lw %s, %d(sp)\n    sw %s, %s" temp_reg offset temp_reg reg, reg)
+            (ctx, Printf.sprintf "\n    lw %s, %d(sp)\n    sw %s, %s" temp_reg offset temp_reg reg, reg)
         else
-            (ctx, Printf.sprintf "  \n  lw %s, %d(sp)" reg offset, reg)
+            (ctx, Printf.sprintf "\n    lw %s, %d(sp)" reg offset, reg)
     
     | BinOp (e1, op, e2) ->
         let (ctx, asm1, reg1) = gen_expr ctx e1 in
@@ -198,29 +193,29 @@ let rec gen_expr ctx expr =
         let (ctx, real_dest, store_asm) = 
             if String.contains reg_dest '(' then 
                 let (ctx, temp_reg) = alloc_temp_reg ctx in
-                (ctx, temp_reg, Printf.sprintf " \n   sw %s, %s" temp_reg reg_dest)
+                (ctx, temp_reg, Printf.sprintf "\n    sw %s, %s" temp_reg reg_dest)
             else 
                 (ctx, reg_dest, "") in
         
         let instr = match op with
-        | Add -> Printf.sprintf "add %s, %s, %s" real_dest reg1_val reg2_val
-        | Sub -> Printf.sprintf "sub %s, %s, %s" real_dest reg1_val reg2_val
-        | Mul -> Printf.sprintf "mul %s, %s, %s" real_dest reg1_val reg2_val
-        | Div -> Printf.sprintf "div %s, %s, %s" real_dest reg1_val reg2_val
-        | Mod -> Printf.sprintf "rem %s, %s, %s" real_dest reg1_val reg2_val
-        | Lt  -> Printf.sprintf "slt %s, %s, %s" real_dest reg1_val reg2_val
-        | Le  -> Printf.sprintf "slt %s, %s, %s\n    xori %s, %s, 1" real_dest reg2_val reg1_val real_dest real_dest
-        | Gt  -> Printf.sprintf "slt %s, %s, %s" real_dest reg2_val reg1_val
-        | Ge  -> Printf.sprintf "slt %s, %s, %s\n    xori %s, %s, 1" real_dest reg1_val reg2_val real_dest real_dest
-        | Eq  -> Printf.sprintf "sub %s, %s, %s\n    seqz %s, %s" real_dest reg1_val reg2_val real_dest real_dest
-        | Ne  -> Printf.sprintf "sub %s, %s, %s\n    snez %s, %s" real_dest reg1_val reg2_val real_dest real_dest
-        | And -> Printf.sprintf "and %s, %s, %s" real_dest reg1_val reg2_val
-        | Or  -> Printf.sprintf "or %s, %s, %s" real_dest reg1_val reg2_val
+        | Add -> Printf.sprintf "\n    add %s, %s, %s" real_dest reg1_val reg2_val
+        | Sub -> Printf.sprintf "\n    sub %s, %s, %s" real_dest reg1_val reg2_val
+        | Mul -> Printf.sprintf "\n    mul %s, %s, %s" real_dest reg1_val reg2_val
+        | Div -> Printf.sprintf "\n    div %s, %s, %s" real_dest reg1_val reg2_val
+        | Mod -> Printf.sprintf "\n    rem %s, %s, %s" real_dest reg1_val reg2_val
+        | Lt  -> Printf.sprintf "\n    slt %s, %s, %s" real_dest reg1_val reg2_val
+        | Le  -> Printf.sprintf "\n    slt %s, %s, %s\n    xori %s, %s, 1" real_dest reg2_val reg1_val real_dest real_dest
+        | Gt  -> Printf.sprintf "\n    slt %s, %s, %s" real_dest reg2_val reg1_val
+        | Ge  -> Printf.sprintf "\n    slt %s, %s, %s\n    xori %s, %s, 1" real_dest reg1_val reg2_val real_dest real_dest
+        | Eq  -> Printf.sprintf "\n    sub %s, %s, %s\n    seqz %s, %s" real_dest reg1_val reg2_val real_dest real_dest
+        | Ne  -> Printf.sprintf "\n    sub %s, %s, %s\n    snez %s, %s" real_dest reg1_val reg2_val real_dest real_dest
+        | And -> Printf.sprintf "\n    and %s, %s, %s" real_dest reg1_val reg2_val
+        | Or  -> Printf.sprintf "\n    or %s, %s, %s" real_dest reg1_val reg2_val
         in
         
         (* 释放源寄存器 *)
         let ctx = free_temp_reg (free_temp_reg ctx) in
-        (ctx, asm1 ^ asm2 ^ load_asm1 ^ load_asm2 ^ "\n" ^ instr ^ "\n" ^ store_asm, reg_dest)
+        (ctx, asm1 ^ asm2 ^ load_asm1 ^ load_asm2 ^ instr ^ store_asm, reg_dest)
     
     | UnOp (op, e) ->
         let (ctx, asm, reg) = gen_expr ctx e in
@@ -234,19 +229,19 @@ let rec gen_expr ctx expr =
         let (ctx, real_dest, store_asm) = 
             if String.contains reg_dest '(' then 
                 let (ctx, temp_reg) = alloc_temp_reg ctx in
-                (ctx, temp_reg, Printf.sprintf "    sw %s, %s" temp_reg reg_dest)
+                (ctx, temp_reg, Printf.sprintf "\n    sw %s, %s" temp_reg reg_dest)
             else 
                 (ctx, reg_dest, "") in
         
         let instr = match op with
-        | UPlus  -> Printf.sprintf "mv %s, %s" real_dest reg_val
-        | UMinus -> Printf.sprintf "neg %s, %s" real_dest reg_val
-        | Not    -> Printf.sprintf "seqz %s, %s" real_dest reg_val
+        | UPlus  -> Printf.sprintf "\n    mv %s, %s" real_dest reg_val
+        | UMinus -> Printf.sprintf "\n    neg %s, %s" real_dest reg_val
+        | Not    -> Printf.sprintf "\n    seqz %s, %s" real_dest reg_val
         in
         
         (* 释放源寄存器 *)
         let ctx = free_temp_reg ctx in
-        (ctx, asm ^ load_asm ^ "\n" ^ instr ^ "\n" ^ store_asm, reg_dest)
+        (ctx, asm ^ load_asm ^ instr ^ store_asm, reg_dest)
     
     | FuncCall (name, args) ->
         (* 保存所有临时寄存器 *)
@@ -254,10 +249,10 @@ let rec gen_expr ctx expr =
             if ctx.temp_regs_used > 0 then
                 let save_instrs = 
                     List.init ctx.temp_regs_used (fun i -> 
-                        Printf.sprintf " \n   sw t%d, %d(sp)" i (ctx.spill_offset + i * 4))
-                    |> String.concat "\n"
+                        Printf.sprintf "\n    sw t%d, %d(sp)" i (ctx.spill_offset + i * 4))
+                    |> String.concat ""
                 in
-                Printf.sprintf "   \n addi sp, sp, -%d\n%s" (ctx.temp_regs_used * 4) save_instrs
+                Printf.sprintf "\n    addi sp, sp, -%d%s" (ctx.temp_regs_used * 4) save_instrs
             else
                 ""
         in
@@ -267,8 +262,8 @@ let rec gen_expr ctx expr =
             if ctx.temp_regs_used > 0 then
                 let restore_instrs = 
                     List.init ctx.temp_regs_used (fun i -> 
-                        Printf.sprintf " \n   lw t%d, %d(sp)" i (ctx.spill_offset + i * 4))
-                    |> String.concat "\n"
+                        Printf.sprintf "\n    lw t%d, %d(sp)" i (ctx.spill_offset + i * 4))
+                    |> String.concat ""
                 in
                 restore_instrs ^ Printf.sprintf "\n    addi sp, sp, %d" (ctx.temp_regs_used * 4)
             else
@@ -286,7 +281,7 @@ let rec gen_expr ctx expr =
         (* 调整栈指针 *)
         let stack_adj_asm = 
             if aligned_temp_space > 0 then 
-                Printf.sprintf "  \n  addi sp, sp, -%d\n" aligned_temp_space
+                Printf.sprintf "\n    addi sp, sp, -%d" aligned_temp_space
             else ""
         in
         
@@ -297,28 +292,28 @@ let rec gen_expr ctx expr =
                 | [] -> asm
                 | reg::rest when index < 8 ->
                     let target = Printf.sprintf "a%d" index in
-                    let (_, move_instr) = 
-                        if reg = target then (ctx, "")
-                        else handle_stack_location ctx reg
+                    let (_, move_instr, reg_val) = handle_stack_location ctx reg in
+                    let new_asm = 
+                        if reg_val = target then asm 
+                        else asm ^ move_instr ^ Printf.sprintf "\n    mv %s, %s" target reg_val
                     in
-                    let new_asm = asm ^ move_instr ^ Printf.sprintf "    mv %s, %s\n" target reg in
                     move_args rest (index+1) new_asm
                 | reg::rest ->
                     let stack_offset = 28 + (index - 8) * 4 in
                     let (_, move_instr, reg_val) = handle_stack_location ctx reg in
                     move_args rest (index+1) 
-                        (asm ^ move_instr ^ Printf.sprintf "   \n sw %s, %d(sp)\n" reg_val stack_offset)
+                        (asm ^ move_instr ^ Printf.sprintf "\n    sw %s, %d(sp)" reg_val stack_offset)
             in
             move_args arg_regs 0 ""
         in
         
         (* 函数调用 *)
-        let call_asm = Printf.sprintf "    call %s\n" name in
+        let call_asm = Printf.sprintf "\n    call %s" name in
         
         (* 恢复栈指针 *)
         let restore_stack_asm = 
             if aligned_temp_space > 0 then 
-                Printf.sprintf " \n   addi sp, sp, %d" aligned_temp_space
+                Printf.sprintf "\n    addi sp, sp, %d" aligned_temp_space
             else ""
         in
         
@@ -326,14 +321,14 @@ let rec gen_expr ctx expr =
         let (ctx, reg_dest) = alloc_temp_reg ctx in
         let move_result = 
             if String.contains reg_dest '(' then
-                Printf.sprintf " \n   sw a0, %s" reg_dest
+                Printf.sprintf "\n    sw a0, %s" reg_dest
             else
-                Printf.sprintf "  \n  mv %s, a0" reg_dest
+                Printf.sprintf "\n    mv %s, a0" reg_dest
         in
         
         (* 组合汇编代码 *)
-        let asm = save_temps_asm ^ "\n" ^ arg_asm ^ stack_adj_asm ^ move_args_asm ^ call_asm ^ 
-                  restore_stack_asm ^ "\n" ^ move_result ^ "\n" ^ restore_temps_asm in
+        let asm = save_temps_asm ^ arg_asm ^ stack_adj_asm ^ move_args_asm ^ call_asm ^ 
+                  restore_stack_asm ^ move_result ^ restore_temps_asm in
         
         (* 释放参数寄存器 *)
         let ctx = List.fold_left (fun ctx _ -> free_temp_reg ctx) ctx arg_regs in
@@ -354,7 +349,7 @@ and gen_args ctx args =
 let rec gen_stmts ctx stmts =
     List.fold_left (fun (ctx, asm) stmt ->
         let (ctx', stmt_asm) = gen_stmt ctx stmt in
-        (ctx', asm ^ "\n" ^ stmt_asm)
+        (ctx', asm ^ stmt_asm)
     ) (ctx, "") stmts
 
 (* 语句代码生成 *)
@@ -378,22 +373,22 @@ and gen_stmt ctx stmt =
         let offset = get_var_offset ctx name in
         let store_asm = 
             if String.contains reg '(' then
-                Printf.sprintf "  \n  lw t0, %s\n    sw t0, %d(sp)" reg offset
+                Printf.sprintf "\n    lw t0, %s\n    sw t0, %d(sp)" reg offset
             else
-                Printf.sprintf "  \n  sw %s, %d(sp)" reg offset
+                Printf.sprintf "\n    sw %s, %d(sp)" reg offset
         in
-        (free_temp_reg ctx, expr_asm ^ "\n" ^ store_asm)
+        (free_temp_reg ctx, expr_asm ^ store_asm)
     
     | VarAssign (name, expr) ->
         let offset = get_var_offset ctx name in
         let (ctx, expr_asm, reg) = gen_expr ctx expr in
         let store_asm = 
             if String.contains reg '(' then
-                Printf.sprintf " \n   lw t0, %s\n    sw t0, %d(sp)" reg offset
+                Printf.sprintf "\n    lw t0, %s\n    sw t0, %d(sp)" reg offset
             else
-                Printf.sprintf "  \n  sw %s, %d(sp)" reg offset
+                Printf.sprintf "\n    sw %s, %d(sp)" reg offset
         in
-        (free_temp_reg ctx, expr_asm ^ "\n" ^ store_asm)
+        (free_temp_reg ctx, expr_asm ^ store_asm)
     
     | If (cond, then_stmt, else_stmt) ->
         let (ctx, cond_asm, cond_reg) = gen_expr ctx cond in
@@ -448,13 +443,13 @@ and gen_stmt ctx stmt =
     | Break ->
         (match ctx.loop_stack with
         | (_, end_label)::_ -> 
-            (ctx, Printf.sprintf "    j %s" end_label)
+            (ctx, Printf.sprintf "\n    j %s" end_label)
         | [] -> failwith "break outside loop")
     
     | Continue ->
         (match ctx.loop_stack with
         | (begin_label, _)::_ -> 
-            (ctx, Printf.sprintf "    j %s" begin_label)
+            (ctx, Printf.sprintf "\n    j %s" begin_label)
         | [] -> failwith "continue outside loop")
     
     | Return expr_opt ->
@@ -471,7 +466,7 @@ and gen_stmt ctx stmt =
         in
         (* 关键修复：在返回语句后直接跳转到函数结尾 *)
         let epilogue_asm = gen_epilogue ctx in
-        (free_temp_reg ctx, expr_asm ^ "\n" ^ epilogue_asm)
+        (free_temp_reg ctx, expr_asm ^ epilogue_asm)
     
     | EmptyStmt -> (ctx, "")
     
@@ -505,12 +500,12 @@ let gen_function func =
                     (* 寄存器参数 *)
                     let reg = Printf.sprintf "a%d" index in
                     gen_save rest (index + 1) 
-                        (asm ^ Printf.sprintf "  \n  sw %s, %d(sp)\n" reg offset)
+                        (asm ^ Printf.sprintf "\n    sw %s, %d(sp)" reg offset)
                 ) else (
                     (* 栈传递参数 *)
                     let stack_offset = (index - 8) * 4 in
                     gen_save rest (index + 1) 
-                        (asm ^ Printf.sprintf "  \n  lw t0, %d(sp)\n    sw t0, %d(sp)\n" stack_offset offset)
+                        (asm ^ Printf.sprintf "\n    lw t0, %d(sp)\n    sw t0, %d(sp)" stack_offset offset)
                 )
         in
         gen_save func.params 0 ""
@@ -526,7 +521,7 @@ let gen_function func =
     (* 生成函数结语 *)
     let epilogue_asm = gen_epilogue ctx in
     
-    prologue_asm ^ "\n" ^ save_params_asm ^ body_asm ^ epilogue_asm
+    prologue_asm ^ save_params_asm ^ body_asm ^ epilogue_asm
 
 (* 编译单元代码生成 *)
 let compile cu =
