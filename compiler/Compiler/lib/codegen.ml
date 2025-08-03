@@ -123,7 +123,7 @@ let gen_epilogue ctx =
     (* 生成恢复寄存器的汇编代码 - 逆序恢复：先恢复ra，然后s11-s0 *)
     let restore_regs_asm = 
         let restore_list = 
-            List.rev (("ra" :: ctx.saved_regs) (* 恢复顺序：ra, s11, s10, ..., s0 *)
+            List.rev (("ra" :: ctx.saved_regs)) (* 恢复顺序：ra, s11, s10, ..., s0 *)
         in
         List.mapi (fun i reg ->
             let offset = (List.length ctx.saved_regs * 4) - (i * 4) in
