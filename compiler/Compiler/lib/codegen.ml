@@ -185,76 +185,63 @@ let rec gen_expr ctx expr =
      let ctx = free_temp_reg ctx in  (* 释放源寄存器 *)
         (ctx, asm ^ "\n" ^ instr, reg_dest)
 | FuncCall (name, args) ->
-      (* 先计算所有参数表达式，不调整栈指针 *)
-      let (ctx, arg_asm, arg_regs) = gen_args ctx args in
-      
-      (* 计算额外参数数量 *)
-      let n_extra = max (List.length args - 8) 0 in
-      let temp_space = 28 + n_extra * 4 in
-      let aligned_temp_space = align_stack temp_space stack_align in
-      
-      (* 调整栈指针 *)
-      let stack_adj_asm = 
+    let n_args = List.length args in
+    let n_extra = max (n_args - 8) 0 in
+    let temp_space = 28 + n_extra * 4 in
+    let aligned_temp_space = align_stack temp_space stack_align in
+  
+    (* 1. 调整栈指针 *)
+    let stack_adj_asm = 
         if aligned_temp_space > 0 then 
-          Printf.sprintf "  \n  addi sp, sp, -%d\n" aligned_temp_space
-        else ""
-      in
-      
-      (* 保存临时寄存器 *)
-      let save_temps_asm = 
+        Printf.sprintf "    addi sp, sp, -%d\n" aligned_temp_space
+        else "" in
+  
+    (* 2. 保存临时寄存器 *)
+    let save_temps_asm = 
         List.init 7 (fun i -> 
-          Printf.sprintf "    sw t%d, %d(sp)" i (i * 4))
-        |> String.concat "\n"
-      in
-      
-      (* 移动参数到正确位置 *)
-      let move_args_asm = 
-        let rec move_args regs index asm =
-          match regs with
-          | [] -> asm
-          | reg::rest when index < 8 ->
-              let target = Printf.sprintf "a%d" index in
-              let new_asm = if reg = target then asm else
-                  asm ^ Printf.sprintf "    mv %s, %s\n" target reg
-              in
-              move_args rest (index+1) new_asm
-          | reg::rest ->
-              let stack_offset = 28 + (index - 8) * 4 in
-              move_args rest (index+1) 
-                (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg stack_offset)
+        Printf.sprintf "    sw t%d, %d(sp)" i (i * 4))
+        |> String.concat "\n" in
+  
+    (* 3. 逐个处理参数 *)
+    let (ctx, args_asm) = 
+        List.fold_left (fun (ctx, asm_so_far) (index, arg_expr) ->
+        let (ctx, expr_asm, result_reg) = gen_expr ctx arg_expr in
+        let move_asm = 
+            if index < 8 then
+            let target_reg = Printf.sprintf "a%d" index in
+            if result_reg = target_reg then "" 
+            else Printf.sprintf "    mv %s, %s" target_reg result_reg
+            else
+            let stack_offset = 28 + (index - 8) * 4 in
+            Printf.sprintf "    sw %s, %d(sp)" result_reg stack_offset
         in
-        move_args arg_regs 0 ""
-      in
-      
-      (* 函数调用 *)
-      let call_asm = Printf.sprintf "    call %s\n" name in
-      
-      (* 恢复临时寄存器 *)
-      let restore_temps_asm = 
+        let ctx = free_temp_reg ctx in  (* 立即释放寄存器 *)
+        (ctx, asm_so_far ^ expr_asm ^ "\n" ^ move_asm ^ "\n")
+        ) (ctx, "") (List.mapi (fun i arg -> (i, arg)) args) in
+  
+    (* 4. 函数调用 *)
+    let call_asm = Printf.sprintf "    call %s\n" name in
+  
+    (* 5. 恢复临时寄存器 *)
+    let restore_temps_asm = 
         List.init 7 (fun i -> 
-          Printf.sprintf " \n   lw t%d, %d(sp)" i (i * 4))
-        |> String.concat "\n"
-      in
-      
-      (* 恢复栈指针 *)
-      let restore_stack_asm = 
+        Printf.sprintf "    lw t%d, %d(sp)" i (i * 4))
+        |> String.concat "\n" in
+  
+    (* 6. 恢复栈指针 *)
+    let restore_stack_asm = 
         if aligned_temp_space > 0 then 
-          Printf.sprintf "  \n  addi sp, sp, %d" aligned_temp_space
-        else ""
-      in
-      
-      (* 将返回值移动到目标寄存器 *)
-      let (ctx, reg_dest) = alloc_temp_reg ctx in
-      let move_result = Printf.sprintf "    mv %s, a0" reg_dest in
-      
-      (* 组合汇编代码 *)
-      let asm = arg_asm ^ stack_adj_asm ^ save_temps_asm ^ "\n" ^ 
-                move_args_asm ^ call_asm ^ "\n" ^ 
-                restore_temps_asm ^ "\n" ^ restore_stack_asm ^ "\n" ^ 
-                move_result in
-      
-      let ctx = List.fold_left (fun ctx _ -> free_temp_reg ctx) ctx arg_regs in
-        (ctx, asm, reg_dest)
+        Printf.sprintf "    addi sp, sp, %d" aligned_temp_space
+        else "" in
+  
+    (* 7. 处理返回值 *)
+    let (ctx, dest_reg) = alloc_temp_reg ctx in
+    let move_result_asm = Printf.sprintf "    mv %s, a0" dest_reg in
+  
+    let asm = stack_adj_asm ^ save_temps_asm ^ "\n" ^ 
+                args_asm ^ call_asm ^ restore_temps_asm ^ "\n" ^ 
+                restore_stack_asm ^ "\n" ^ move_result_asm in
+    (ctx, asm, dest_reg)
 
 (* 生成参数代码 - 返回参数寄存器列表 *)
 and gen_args ctx args =
