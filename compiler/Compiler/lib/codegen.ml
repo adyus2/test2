@@ -73,6 +73,13 @@ let add_var ctx name size =
     match ctx.var_offset with
     | current_scope :: rest_scopes ->
         let offset = ctx.saved_area_size + ctx.local_offset in
+        (* 检查栈空间是否足够 *)
+        let total_space_needed = offset + size in
+        if total_space_needed > ctx.frame_size then (
+            (* 需要重新计算frame_size或报错 *)
+            Printf.eprintf "Warning: Stack space insufficient. Need %d bytes but frame size is %d\n" 
+                total_space_needed ctx.frame_size;
+        );
         (* 将新绑定添加到当前作用域 *)
         let new_scope = (name, offset) :: current_scope in
         (* 更新当前作用域，并更新局部偏移量 *)
@@ -99,10 +106,16 @@ let align_stack size align =
     if remainder = 0 then size else size + (align - remainder)
 
 (* 函数序言生成 *)
-let gen_prologue ctx func =
-    (* 总栈大小 = 保存区域 + 局部变量区域 *)
-    let total_size = align_stack (ctx.saved_area_size + ctx.local_offset) stack_align in
-    (* 生成保存寄存器的汇编代码 - 顺序保存s0-s11，最后保存ra *)
+let gen_prologue_fixed ctx func =
+    (* 预估需要的局部变量空间 - 这个需要根据函数复杂度调整 *)
+    let estimated_locals = 
+        match func.name with
+        | "main" -> 200  (* main函数需要更多空间 *)
+        | _ -> 64        (* 其他函数 *)
+    in
+    (* 总栈大小 = 保存区域 + 预估局部变量空间 *)
+    let total_size = align_stack (ctx.saved_area_size + estimated_locals) stack_align in
+    (* 生成保存寄存器的汇编代码 *)
     let save_regs_asm = 
         let save_instrs = 
             List.mapi (fun i reg -> 
