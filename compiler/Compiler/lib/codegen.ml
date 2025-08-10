@@ -397,7 +397,7 @@ and gen_stmt ctx stmt =
 let gen_function func =
     let ctx = create_context func.name in
     (* 处理参数 *)
-    let ctx = 
+    let ctx =
         List.fold_left (fun ctx param ->
             let ctx = add_var ctx param 4 in
             { ctx with param_count = ctx.param_count + 1 }
@@ -407,30 +407,26 @@ let gen_function func =
     (* 生成函数体 *)
     let (_, body_asm) = gen_stmts ctx (match func.body with Block stmts -> stmts | _ -> [func.body]) in
     
-    (* 计算实际需要的栈帧大小（在知道所有变量后） *)
+    (* 计算实际需要的栈帧大小(在知道所有变量后) *)
     let total_local_size = ctx.max_local_offset in
     let total_size = align_stack (ctx.saved_area_size + total_local_size) stack_align in
     let ctx = { ctx with frame_size = total_size } in
     
-    (* 生成序言（使用实际大小） *)
-    let prologue_asm = 
-        let save_regs_asm = 
-            List.mapi (fun i reg -> 
+    (* 生成序言(使用实际大小) *)
+    let prologue_asm =
+        let save_regs_asm =
+            let reg_saves = List.mapi (fun i reg ->
                 Printf.sprintf "    sw %s, %d(sp)" reg (i * 4)
-            ctx.saved_regs
-            @ [Printf.sprintf "    sw ra, %d(sp)" (List.length ctx.saved_regs * 4)]
-            |> String.concat "\n"
+            ) ctx.saved_regs in
+            let ra_save = Printf.sprintf "    sw ra, %d(sp)" (List.length ctx.saved_regs * 4) in
+            String.concat "\n" (reg_saves @ [ra_save])
         in
-        Printf.sprintf "
-    .globl %s
-%s:
-    addi sp, sp, -%d
-%s
-" func.name func.name total_size save_regs_asm
+        Printf.sprintf ".globl %s\n%s:\n    addi sp, sp, -%d\n%s"
+            func.name func.name total_size save_regs_asm
     in
     
-    (* 保存参数到局部变量区 - 关键修复：栈传递参数偏移量 *)
-    let save_params_asm = 
+    (* 保存参数到局部变量区 - 关键修复:栈传递参数偏移量 *)
+    let save_params_asm =
         let rec gen_save params index asm =
             match params with
             | [] -> asm
@@ -439,23 +435,23 @@ let gen_function func =
                 if index < 8 then (
                     (* 寄存器参数 *)
                     let reg = Printf.sprintf "a%d" index in
-                    gen_save rest (index + 1) 
+                    gen_save rest (index + 1)
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
-                    (* 关键修复：栈传递参数在调用者栈帧中，不在当前栈帧 *)
+                    (* 关键修复:栈传递参数在调用者栈帧中,不在当前栈帧 *)
                     let stack_offset = (index - 8) * 4 in  (* 移除ctx.frame_size *)
                     let (_, reg) = alloc_temp_reg ctx in  (* 使用临时寄存器 *)
-                    let load_asm = Printf.sprintf "  \n  lw %s, %d(sp)\n" reg stack_offset in
+                    let load_asm = Printf.sprintf "    lw %s, %d(sp)\n" reg stack_offset in
                     let store_asm = Printf.sprintf "    sw %s, %d(sp)" reg offset in
-                    gen_save rest (index + 1) 
+                    gen_save rest (index + 1)
                         (asm ^ load_asm ^ store_asm ^ "\n")
                 )
         in
         gen_save func.params 0 ""
     in
     
-    (* 生成函数体：直接处理语句列表（不额外添加作用域） *)
-    let (_, body_asm) = 
+    (* 生成函数体:直接处理语句列表(不额外添加作用域) *)
+    let (_, body_asm) =
         match func.body with
         | Block stmts -> gen_stmts ctx stmts
         | _ -> gen_stmt ctx func.body
@@ -465,6 +461,7 @@ let gen_function func =
     let epilogue_asm = gen_epilogue ctx in
     
     prologue_asm ^ "\n" ^ save_params_asm ^ body_asm ^ epilogue_asm
+    
 (* 编译单元代码生成 *)
 let compile cu =
     let main_exists = ref false in
