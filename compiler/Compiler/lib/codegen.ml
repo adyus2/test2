@@ -416,7 +416,7 @@ let gen_function func =
     let prologue_asm = 
         let save_regs_asm = 
             List.mapi (fun i reg -> 
-                Printf.sprintf "    sw %s, %d(sp)" reg (i * 4))
+                Printf.sprintf "    sw %s, %d(sp)" reg (i * 4)
             ctx.saved_regs
             @ [Printf.sprintf "    sw ra, %d(sp)" (List.length ctx.saved_regs * 4)]
             |> String.concat "\n"
