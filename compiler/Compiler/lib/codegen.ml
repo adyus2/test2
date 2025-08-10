@@ -215,25 +215,24 @@ let rec gen_expr ctx expr =
       let stack_adj_asm = 
         if aligned_temp_space > 0 then 
           Printf.sprintf "  \n  addi sp, sp, -%d\n" aligned_temp_space
-        else ""
-      in
+        else "" in
       
       (* 保存临时寄存器 *)
       let save_temps_asm = 
         List.init 7 (fun i -> 
           Printf.sprintf "    sw t%d, %d(sp)" i (i * 4))
-        |> String.concat "\n"
-      in
+        |> String.concat "\n" in
       
-      (* 移动参数到正确位置 *)
+      (* 移动参数到正确位置 - 使用临时寄存器t0中转避免覆盖 *)
       let move_args_asm = 
         let rec move_args regs index asm =
           match regs with
           | [] -> asm
           | reg::rest when index < 8 ->
               let target = Printf.sprintf "a%d" index in
-              let new_asm = if reg = target then asm else
-                  asm ^ Printf.sprintf "    mv %s, %s\n" target reg
+              let new_asm = 
+                if reg = target then asm 
+                else asm ^ Printf.sprintf "    mv t0, %s\n    mv %s, t0\n" reg target
               in
               move_args rest (index+1) new_asm
           | reg::rest ->
@@ -251,15 +250,13 @@ let rec gen_expr ctx expr =
       let restore_temps_asm = 
         List.init 7 (fun i -> 
           Printf.sprintf " \n   lw t%d, %d(sp)" i (i * 4))
-        |> String.concat "\n"
-      in
+        |> String.concat "\n" in
       
       (* 恢复栈指针 *)
       let restore_stack_asm = 
         if aligned_temp_space > 0 then 
           Printf.sprintf "  \n  addi sp, sp, %d" aligned_temp_space
-        else ""
-      in
+        else "" in
       
       (* 将返回值移动到目标寄存器 *)
       let (ctx, reg_dest) = alloc_temp_reg ctx in
@@ -435,8 +432,8 @@ let gen_function func =
                     gen_save rest (index + 1)
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
-                    (* 关键修复:栈传递参数在调用者栈帧中,不在当前栈帧 *)
-                    let stack_offset = (index - 8) * 4 in  (* 移除ctx.frame_size *)
+                    (* 关键修复:栈传递参数在调用者栈帧中,偏移量为当前栈帧大小+28+(index-8)*4 *)
+                    let stack_offset = ctx.frame_size + 28 + (index - 8) * 4 in
                     let (_, reg) = alloc_temp_reg ctx in  (* 使用临时寄存器 *)
                     let load_asm = Printf.sprintf "    lw %s, %d(sp)\n" reg stack_offset in
                     let store_asm = Printf.sprintf "    sw %s, %d(sp)" reg offset in
