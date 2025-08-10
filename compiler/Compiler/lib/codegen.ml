@@ -201,32 +201,9 @@ let rec gen_expr ctx expr =
         in
      let ctx = free_temp_reg ctx in  (* 释放源寄存器 *)
         (ctx, asm ^ "\n" ^ instr, reg_dest)
+
 | FuncCall (name, args) ->
-    (* 保存当前使用的临时寄存器 *)
-    let saved_temps = 
-        List.init ctx.temp_regs_used (fun i -> 
-            let reg = List.nth all_temp_regs i in
-            (reg, get_var_offset ctx ("__temp_" ^ reg))
-        )
-    in
-    
-    (* 生成保存代码 *)
-    let save_code = 
-        saved_temps |> List.map (fun (reg, offset) ->
-            Printf.sprintf "    sw %s, %d(sp)" reg offset
-        ) |> String.concat "\n"
-    in
-    
-    (* 生成恢复代码 *)
-    let restore_code = 
-        saved_temps |> List.map (fun (reg, offset) ->
-            Printf.sprintf "    lw %s, %d(sp)" reg offset
-        ) |> String.concat "\n"
-    in
-    
-    (* 将保存/恢复代码整合到函数调用中 *)
-    let asm = 
-        (* 先计算所有参数表达式，不调整栈指针 *)
+      (* 先计算所有参数表达式，不调整栈指针 *)
       let (ctx, arg_asm, arg_regs) = gen_args ctx args in
       
       (* 计算额外参数数量 *)
@@ -295,8 +272,7 @@ let rec gen_expr ctx expr =
                 move_result in
       
       let ctx = List.fold_left (fun ctx _ -> free_temp_reg ctx) ctx arg_regs in
-        (ctx, asm, reg_dest) in
-    save_code ^ asm ^ restore_code
+        (ctx, asm, reg_dest)
 
 (* 生成参数代码 - 返回参数寄存器列表 *)
 and gen_args ctx args =
@@ -440,7 +416,7 @@ let gen_function func =
     let prologue_asm = 
         let save_regs_asm = 
             List.mapi (fun i reg -> 
-                Printf.sprintf "    sw %s, %d(sp)" reg (i * 4)
+                Printf.sprintf "    sw %s, %d(sp)" reg (i * 4))
             ctx.saved_regs
             @ [Printf.sprintf "    sw ra, %d(sp)" (List.length ctx.saved_regs * 4)]
             |> String.concat "\n"
@@ -489,7 +465,6 @@ let gen_function func =
     let epilogue_asm = gen_epilogue ctx in
     
     prologue_asm ^ "\n" ^ save_params_asm ^ body_asm ^ epilogue_asm
-
 (* 编译单元代码生成 *)
 let compile cu =
     let main_exists = ref false in
