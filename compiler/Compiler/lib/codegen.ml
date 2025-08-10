@@ -157,19 +157,19 @@ let rec gen_expr ctx expr =
         let (ctx, asm2, reg2) = gen_expr ctx e2 in
         let (ctx, reg_dest) = alloc_temp_reg ctx in
         let instr = match op with
-        | Add -> Printf.sprintf "add %s, %s, %s" reg_dest reg1 reg2
-        | Sub -> Printf.sprintf "sub %s, %s, %s" reg_dest reg1 reg2
-        | Mul -> Printf.sprintf "mul %s, %s, %s" reg_dest reg1 reg2
-        | Div -> Printf.sprintf "div %s, %s, %s" reg_dest reg1 reg2
-        | Mod -> Printf.sprintf "rem %s, %s, %s" reg_dest reg1 reg2
-        | Lt  -> Printf.sprintf "slt %s, %s, %s" reg_dest reg1 reg2
-        | Le  -> Printf.sprintf "slt %s, %s, %s\n    xori %s, %s, 1" reg_dest reg2 reg1 reg_dest reg_dest
-        | Gt  -> Printf.sprintf "slt %s, %s, %s" reg_dest reg2 reg1
-        | Ge  -> Printf.sprintf "slt %s, %s, %s\n    xori %s, %s, 1" reg_dest reg1 reg2 reg_dest reg_dest
-        | Eq  -> Printf.sprintf "sub %s, %s, %s\n    seqz %s, %s" reg_dest reg1 reg2 reg_dest reg_dest
-        | Ne  -> Printf.sprintf "sub %s, %s, %s\n    snez %s, %s" reg_dest reg1 reg2 reg_dest reg_dest
-        | And -> Printf.sprintf "and %s, %s, %s" reg_dest reg1 reg2
-        | Or  -> Printf.sprintf "or %s, %s, %s" reg_dest reg1 reg2
+            | Add -> Printf.sprintf "add %s, %s, %s" reg_dest reg1 reg2
+            | Sub -> Printf.sprintf "sub %s, %s, %s" reg_dest reg1 reg2
+            | Mul -> Printf.sprintf "mul %s, %s, %s" reg_dest reg1 reg2
+            | Div -> Printf.sprintf "div %s, %s, %s" reg_dest reg1 reg2
+            | Mod -> Printf.sprintf "rem %s, %s, %s" reg_dest reg1 reg2
+            | Lt  -> Printf.sprintf "slt %s, %s, %s" reg_dest reg1 reg2
+            | Le  -> Printf.sprintf "slt %s, %s, %s\n    xori %s, %s, 1" reg_dest reg2 reg1 reg_dest reg_dest  (* 修复：reg1 <= reg2 等价于 !(reg2 < reg1) *)
+            | Gt  -> Printf.sprintf "slt %s, %s, %s" reg_dest reg2 reg1
+            | Ge  -> Printf.sprintf "slt %s, %s, %s\n    xori %s, %s, 1" reg_dest reg1 reg2 reg_dest reg_dest  (* 修复：reg1 >= reg2 等价于 !(reg1 < reg2) *)
+            | Eq  -> Printf.sprintf "sub %s, %s, %s\n    seqz %s, %s" reg_dest reg1 reg2 reg_dest reg_dest
+            | Ne  -> Printf.sprintf "sub %s, %s, %s\n    snez %s, %s" reg_dest reg1 reg2 reg_dest reg_dest
+            | And -> Printf.sprintf "and %s, %s, %s" reg_dest reg1 reg2
+            | Or  -> Printf.sprintf "or %s, %s, %s" reg_dest reg1 reg2
         in
         (* 释放临时寄存器 *)
      let ctx = free_temp_reg (free_temp_reg ctx) in
