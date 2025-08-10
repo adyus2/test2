@@ -404,9 +404,6 @@ let gen_function func =
         ) ctx func.params
     in
     
-    (* 生成函数体 *)
-    let (_, body_asm) = gen_stmts ctx (match func.body with Block stmts -> stmts | _ -> [func.body]) in
-    
     (* 计算实际需要的栈帧大小(在知道所有变量后) *)
     let total_local_size = ctx.max_local_offset in
     let total_size = align_stack (ctx.saved_area_size + total_local_size) stack_align in
