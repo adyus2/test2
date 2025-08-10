@@ -432,8 +432,8 @@ let gen_function func =
                     gen_save rest (index + 1)
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
-                    (* 关键修复:栈传递参数在调用者栈帧中,偏移量为当前栈帧大小+28+(index-8)*4 *)
-                    let stack_offset = ctx.frame_size + 28 + (index - 8) * 4 in
+                    (* 关键修复:栈传递参数在调用者栈帧中，相对于当前sp的偏移为：(index-8)*4 *)
+                    let stack_offset = (index - 8) * 4 in
                     let (_, reg) = alloc_temp_reg ctx in  (* 使用临时寄存器 *)
                     let load_asm = Printf.sprintf "    lw %s, %d(sp)\n" reg stack_offset in
                     let store_asm = Printf.sprintf "    sw %s, %d(sp)" reg offset in
