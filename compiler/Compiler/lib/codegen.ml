@@ -8,19 +8,21 @@ type reg_type =
 
 (* 上下文类型 *)
 type context = {
-    current_func: string;          (* 当前函数名 *)
-    local_offset: int;             (* 局部变量区当前偏移量 *)
-    frame_size: int;               (* 栈帧总大小（计算后设置） *)
-    var_offset: (string * int) list list; (* 符号表栈：每个作用域是一个(string*int)的列表 *)
-    next_temp: int;                (* 下一个临时寄存器编号 *)
-    label_counter: int;            (* 标签计数器 *)
-    loop_stack: (string * string) list; (* 循环标签栈 (begin_label, end_label) *)
-    saved_regs: string list;       (* 需要保存的寄存器列表 *)
-    reg_map: (string * reg_type) list; (* 寄存器映射 *)
-    param_count: int;              (* 当前参数计数 *)
-    temp_regs_used: int;           (* 已使用的临时寄存器数量 *)
-    saved_area_size: int;          (* 保存区域大小（包含RA和保存的寄存器） *)
+    current_func: string;
+    local_offset: int;
+    frame_size: int;
+    var_offset: (string * int) list list;
+    next_temp: int;
+    label_counter: int;
+    loop_stack: (string * string) list;
+    saved_regs: string list;
+    reg_map: (string * reg_type) list;
+    param_count: int;
+    temp_regs_used: int;
+    saved_area_size: int;
+    max_local_offset: int; (* 新增字段 *)
 }
+
 
 (* 创建新上下文 *)
 let create_context func_name =
@@ -45,6 +47,7 @@ let create_context func_name =
       reg_map = reg_map;
       param_count = 0;
       temp_regs_used = 0;
+      max_local_offset = 0; 
       saved_area_size = 52 } (* 4(ra) + 12*4(regs) = 52 *)
 
 (* 栈对齐常量 *)
@@ -70,30 +73,31 @@ let get_var_offset ctx name =
 
 (* 添加变量到当前作用域 *)
 let add_var ctx name size =
-    match ctx.var_offset with
-    | current_scope :: rest_scopes ->
-        let offset = ctx.saved_area_size + ctx.local_offset in
-        (* 检查栈空间是否足够 *)
-        let total_space_needed = offset + size in
-        if total_space_needed > ctx.frame_size then (
-            (* 需要重新计算frame_size或报错 *)
-            Printf.eprintf "Warning: Stack space insufficient. Need %d bytes but frame size is %d\n" 
-                total_space_needed ctx.frame_size;
-        );
-        (* 将新绑定添加到当前作用域 *)
-        let new_scope = (name, offset) :: current_scope in
-        (* 更新当前作用域，并更新局部偏移量 *)
-        { ctx with 
-            var_offset = new_scope :: rest_scopes;
-            local_offset = ctx.local_offset + size 
-        }
-    | [] -> failwith "No active scope"
+  match ctx.var_offset with
+  | current_scope :: rest_scopes ->
+      let offset = ctx.saved_area_size + ctx.local_offset in
+      let new_scope = (name, offset) :: current_scope in
+      { ctx with 
+          var_offset = new_scope :: rest_scopes;
+          local_offset = ctx.local_offset + size;
+          (* 更新最大局部偏移量 *)
+          max_local_offset = max ctx.max_local_offset (ctx.local_offset + size)
+      }
+  | [] -> failwith "No active scope"
+
 
 (* 分配临时寄存器 *)
 let alloc_temp_reg ctx =
-    if ctx.temp_regs_used >= 7 then
+    (* 可用寄存器列表：t0-t6 + s0-s11 *)
+    let all_temp_regs = [
+        "t0"; "t1"; "t2"; "t3"; "t4"; "t5"; "t6";
+        "s0"; "s1"; "s2"; "s3"; "s4"; "s5"; "s6"; "s7"; "s8"; "s9"; "s10"; "s11"
+    ] in
+    
+    if ctx.temp_regs_used >= List.length all_temp_regs then
         failwith "No more temporary registers available";
-    let reg = Printf.sprintf "t%d" ctx.temp_regs_used in
+    
+    let reg = List.nth all_temp_regs ctx.temp_regs_used in
     { ctx with temp_regs_used = ctx.temp_regs_used + 1 }, reg
 
 (* 释放临时寄存器 *)
@@ -198,7 +202,31 @@ let rec gen_expr ctx expr =
      let ctx = free_temp_reg ctx in  (* 释放源寄存器 *)
         (ctx, asm ^ "\n" ^ instr, reg_dest)
 | FuncCall (name, args) ->
-      (* 先计算所有参数表达式，不调整栈指针 *)
+    (* 保存当前使用的临时寄存器 *)
+    let saved_temps = 
+        List.init ctx.temp_regs_used (fun i -> 
+            let reg = List.nth all_temp_regs i in
+            (reg, get_var_offset ctx ("__temp_" ^ reg))
+        )
+    in
+    
+    (* 生成保存代码 *)
+    let save_code = 
+        saved_temps |> List.map (fun (reg, offset) ->
+            Printf.sprintf "    sw %s, %d(sp)" reg offset
+        ) |> String.concat "\n"
+    in
+    
+    (* 生成恢复代码 *)
+    let restore_code = 
+        saved_temps |> List.map (fun (reg, offset) ->
+            Printf.sprintf "    lw %s, %d(sp)" reg offset
+        ) |> String.concat "\n"
+    in
+    
+    (* 将保存/恢复代码整合到函数调用中 *)
+    let asm = 
+        (* 先计算所有参数表达式，不调整栈指针 *)
       let (ctx, arg_asm, arg_regs) = gen_args ctx args in
       
       (* 计算额外参数数量 *)
@@ -267,7 +295,8 @@ let rec gen_expr ctx expr =
                 move_result in
       
       let ctx = List.fold_left (fun ctx _ -> free_temp_reg ctx) ctx arg_regs in
-        (ctx, asm, reg_dest)
+        (ctx, asm, reg_dest) in
+    save_code ^ asm ^ restore_code
 
 (* 生成参数代码 - 返回参数寄存器列表 *)
 and gen_args ctx args =
@@ -391,8 +420,7 @@ and gen_stmt ctx stmt =
 (* 函数代码生成 *)
 let gen_function func =
     let ctx = create_context func.name in
-    
-    (* 处理参数 - 在局部变量区分配空间 *)
+    (* 处理参数 *)
     let ctx = 
         List.fold_left (fun ctx param ->
             let ctx = add_var ctx param 4 in
@@ -400,8 +428,30 @@ let gen_function func =
         ) ctx func.params
     in
     
-    (* 生成函数序言 *)
-    let (prologue_asm, ctx) = gen_prologue ctx func in
+    (* 生成函数体 *)
+    let (_, body_asm) = gen_stmts ctx (match func.body with Block stmts -> stmts | _ -> [func.body]) in
+    
+    (* 计算实际需要的栈帧大小（在知道所有变量后） *)
+    let total_local_size = ctx.max_local_offset in
+    let total_size = align_stack (ctx.saved_area_size + total_local_size) stack_align in
+    let ctx = { ctx with frame_size = total_size } in
+    
+    (* 生成序言（使用实际大小） *)
+    let prologue_asm = 
+        let save_regs_asm = 
+            List.mapi (fun i reg -> 
+                Printf.sprintf "    sw %s, %d(sp)" reg (i * 4)
+            ctx.saved_regs
+            @ [Printf.sprintf "    sw ra, %d(sp)" (List.length ctx.saved_regs * 4)]
+            |> String.concat "\n"
+        in
+        Printf.sprintf "
+    .globl %s
+%s:
+    addi sp, sp, -%d
+%s
+" func.name func.name total_size save_regs_asm
+    in
     
     (* 保存参数到局部变量区 - 关键修复：栈传递参数偏移量 *)
     let save_params_asm = 
