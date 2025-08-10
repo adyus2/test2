@@ -106,7 +106,7 @@ let align_stack size align =
     if remainder = 0 then size else size + (align - remainder)
 
 (* 函数序言生成 *)
-let gen_prologue_fixed ctx func =
+let gen_prologue ctx func =
     (* 预估需要的局部变量空间 - 这个需要根据函数复杂度调整 *)
     let estimated_locals = 
         match func.name with
