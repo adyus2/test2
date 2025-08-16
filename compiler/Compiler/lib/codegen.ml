@@ -1,3 +1,4 @@
+(* codegen.ml *)
 open Ast
 
 (* 寄存器分类 *)
@@ -142,18 +143,16 @@ let gen_prologue ctx func =
 
 (* 函数结语生成 *)
 let gen_epilogue ctx =
-    (* 生成恢复寄存器的汇编代码 - 逆序恢复：先恢复ra，然后s11-s0 *)
     let restore_regs_asm = 
-        (* 关键修复：按入栈顺序的逆序恢复 *)
-        let restore_list = 
-            ["ra"] @ (List.rev ctx.saved_regs) (* 恢复顺序：ra, s11, s10, ..., s0 *)
-        in
-        (* 关键修复：偏移量计算与保存时完全匹配 *)
-        List.mapi (fun i reg ->
-            let offset = (List.length ctx.saved_regs * 4) - (i * 4) in
-            Printf.sprintf " \n   lw %s, %d(sp)" reg offset
-        ) restore_list
-        |> String.concat "\n"
+        (* 按保存时的逆序恢复：先恢复ra，再逆序恢复s寄存器 *)
+        let ra_restore = Printf.sprintf "    lw ra, %d(sp)" (List.length ctx.saved_regs * 4) in
+        let s_regs_restore = 
+            List.rev ctx.saved_regs
+            |> List.mapi (fun i reg ->
+                let offset = (List.length ctx.saved_regs - 1 - i) * 4 in
+                Printf.sprintf "    lw %s, %d(sp)" reg offset)
+            |> String.concat "\n" in
+        ra_restore ^ "\n" ^ s_regs_restore
     in
     
     Printf.sprintf "
