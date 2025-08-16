@@ -305,6 +305,7 @@ let rec gen_expr ctx expr =
                     (if move_instr = "" then [] else [move_instr]) in
                   move_args rest (index+1) new_parts
               | reg::rest ->
+                  (* 修复：栈参数存储位置从28字节开始(跳过临时寄存器保存区域) *)
                   let stack_offset = 28 + (index - 8) * 4 in
                   let load_src = gen_load_spill reg "t0" in
                   let actual_src = if is_spill_reg reg then "t0" else reg in
@@ -520,9 +521,15 @@ let gen_function func =
         ) ctx func.params
     in
     
-    (* 生成序言(使用实际大小) *)
-    let total_local_size = ctx.max_local_offset in
-    let total_size = align_stack (ctx.saved_area_size + total_local_size) stack_align in
+    (* 预估局部变量空间 *)
+    let estimated_locals = 
+        match func.name with
+        | "main" -> 1000  (* main函数需要更多空间 *)
+        | _ -> 400        (* 其他函数也增加空间 *)
+    in
+    
+    (* 总栈大小 = 保存区域 + 预估局部变量空间 *)
+    let total_size = align_stack (ctx.saved_area_size + estimated_locals) stack_align in
     let ctx = { ctx with frame_size = total_size } in
     
     let prologue_asm =
@@ -538,7 +545,7 @@ let gen_function func =
             func.name func.name total_size save_regs_asm
     in
     
-    (* 修复: 栈传递参数的偏移量计算 *)
+    (* 保存参数到局部变量区域 *)
     let save_params_asm =
         let rec gen_save params index asm =
             match params with
@@ -546,16 +553,18 @@ let gen_function func =
             | param::rest ->
                 let offset = get_var_offset ctx param in
                 if index < 8 then (
+                    (* 寄存器传递的参数 *)
                     let reg = Printf.sprintf "a%d" index in
                     gen_save rest (index + 1)
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
-                    (* 关键修复: 加上调用者保存临时寄存器的空间 (28字节) *)
-                    let stack_offset = total_size + (index - 8) * 4 in
-                    let load_asm = Printf.sprintf "    lw t0, %d(sp)\n" stack_offset in
+                    (* 栈传递的参数 - 修复：确保正确的偏移量计算 *)
+                    (* 栈参数位于调用者栈帧，偏移 = 当前栈帧大小 + (参数索引-8)*4 *)
+                    let caller_arg_offset = total_size + (index - 8) * 4 in
+                    let load_asm = Printf.sprintf "    lw t0, %d(sp)" caller_arg_offset in
                     let store_asm = Printf.sprintf "    sw t0, %d(sp)" offset in
                     gen_save rest (index + 1)
-                        (asm ^ load_asm ^ store_asm ^ "\n")
+                        (asm ^ load_asm ^ "\n" ^ store_asm ^ "\n")
                 )
         in
         gen_save func.params 0 ""
