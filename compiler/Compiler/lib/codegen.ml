@@ -516,22 +516,21 @@ let gen_function func =
     (* 处理参数 *)
     let ctx =
         List.fold_left (fun ctx param ->
-            let ctx = add_var ctx param 4 in
-            { ctx with param_count = ctx.param_count + 1 }
+            add_var ctx param 4
         ) ctx func.params
     in
     
-    (* 计算实际需要的栈帧大小(在知道所有变量后) *)
+    (* 生成序言(使用实际大小) *)
     let total_local_size = ctx.max_local_offset in
     let total_size = align_stack (ctx.saved_area_size + total_local_size) stack_align in
     let ctx = { ctx with frame_size = total_size } in
     
-    (* 生成序言(使用实际大小) *)
     let prologue_asm =
         let save_regs_asm =
             let reg_saves = List.mapi (fun i reg ->
                 Printf.sprintf "    sw %s, %d(sp)" reg (i * 4)
-            ) ctx.saved_regs in
+                ctx.saved_regs
+            in
             let ra_save = Printf.sprintf "    sw ra, %d(sp)" (List.length ctx.saved_regs * 4) in
             String.concat "\n" (reg_saves @ [ra_save])
         in
@@ -539,7 +538,7 @@ let gen_function func =
             func.name func.name total_size save_regs_asm
     in
     
-    (* 保存参数到局部变量区 - 关键修复:栈传递参数偏移量 *)
+    (* 修复: 栈传递参数的偏移量计算 *)
     let save_params_asm =
         let rec gen_save params index asm =
             match params with
@@ -547,13 +546,12 @@ let gen_function func =
             | param::rest ->
                 let offset = get_var_offset ctx param in
                 if index < 8 then (
-                    (* 寄存器参数 *)
                     let reg = Printf.sprintf "a%d" index in
                     gen_save rest (index + 1)
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
-                    (* 关键修复:栈传递参数在调用者栈帧中，相对于当前sp的偏移为：(index-8)*4 *)
-                    let stack_offset = (index - 8) * 4 in
+                    (* 关键修复: 加上调用者保存临时寄存器的空间 (28字节) *)
+                    let stack_offset = total_size + (index - 8) * 4 in
                     let load_asm = Printf.sprintf "    lw t0, %d(sp)\n" stack_offset in
                     let store_asm = Printf.sprintf "    sw t0, %d(sp)" offset in
                     gen_save rest (index + 1)
