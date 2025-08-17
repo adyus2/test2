@@ -281,19 +281,24 @@ let rec gen_expr ctx expr =
     | FuncCall (name, args) ->
     let (ctx, arg_asm, arg_regs) = gen_args ctx args in
     
+    (* 计算需要的栈空间：栈参数 + 临时寄存器保存空间 *)
     let n_extra = max (List.length args - 8) 0 in
-    let temp_space = 28 + n_extra * 4 in
+    let temp_space = n_extra * 4 + 28 in  (* 栈参数空间 + 28字节保存寄存器 *)
     let aligned_temp_space = align_stack temp_space stack_align in
     
     let stack_adj_asm = 
       if aligned_temp_space > 0 then 
-        Printf.sprintf "    addi sp, sp, -%d\n" aligned_temp_space
+        Printf.sprintf "    addi sp, sp, -%d" aligned_temp_space
       else "" in
     
     let save_temps_asm = 
-      List.init 7 (fun i -> 
-        Printf.sprintf "    sw t%d, %d(sp)" i (i * 4))
-      |> String.concat "\n" in
+      if aligned_temp_space > 0 then
+        (* 临时寄存器保存在栈参数空间之后 *)
+        let temp_start_offset = n_extra * 4 in
+        List.init 7 (fun i -> 
+          Printf.sprintf "    sw t%d, %d(sp)" i (temp_start_offset + i * 4))
+        |> String.concat "\n"
+      else "" in
     
     let move_args_asm = 
       let rec move_args regs index parts =
@@ -312,7 +317,8 @@ let rec gen_expr ctx expr =
               (if move_instr = "" then [] else [move_instr]) in
             move_args rest (index+1) new_parts
         | reg::rest ->
-            let stack_offset = 28 + (index - 8) * 4 in
+            (* 标准RISC-V调用约定：栈参数从sp+0开始存储 *)
+            let stack_offset = (index - 8) * 4 in
             let load_src = gen_load_spill reg "t0" in
             let actual_src = if is_spill_reg reg then "t0" else reg in
             let store_instr = Printf.sprintf "    sw %s, %d(sp)" actual_src stack_offset in
@@ -324,12 +330,15 @@ let rec gen_expr ctx expr =
       move_args arg_regs 0 []
     in
     
-    let call_asm = Printf.sprintf "    call %s\n" name in
+    let call_asm = Printf.sprintf "    call %s" name in
     
     let restore_temps_asm = 
-      List.init 7 (fun i -> 
-        Printf.sprintf "    lw t%d, %d(sp)" i (i * 4))
-      |> String.concat "\n" in
+      if aligned_temp_space > 0 then
+        let temp_start_offset = n_extra * 4 in
+        List.init 7 (fun i -> 
+          Printf.sprintf "    lw t%d, %d(sp)" i (temp_start_offset + i * 4))
+        |> String.concat "\n"
+      else "" in
     
     let restore_stack_asm = 
       if aligned_temp_space > 0 then 
@@ -556,8 +565,8 @@ let gen_function func =
                     gen_save rest (index + 1)
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
-                    (* 修正：栈参数的偏移计算 *)
-                    let stack_offset = total_size + 28 + (index - 8) * 4 in
+                    (* 标准RISC-V调用约定：栈参数从调用者栈帧的sp+0开始 *)
+                    let stack_offset = total_size + (index - 8) * 4 in
                     let load_asm = Printf.sprintf "    lw t0, %d(sp)" stack_offset in
                     let store_asm = Printf.sprintf "    sw t0, %d(sp)" offset in
                     gen_save rest (index + 1)
@@ -579,8 +588,8 @@ let gen_function func =
             | Return _ -> true
             | Block stmts -> List.exists has_return stmts
             | If (_, then_stmt, Some else_stmt) -> has_return then_stmt && has_return else_stmt
-            | If (_, _, None) -> false
-            | While (_,_) -> false
+            | If (_, then_stmt, None) -> false
+            | While (_, body) -> false
             | _ -> false
         in
         not (has_return func.body)
