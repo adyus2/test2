@@ -579,8 +579,8 @@ let gen_function func =
             | Return _ -> true
             | Block stmts -> List.exists has_return stmts
             | If (_, then_stmt, Some else_stmt) -> has_return then_stmt && has_return else_stmt
-            | If (_, then_stmt, None) -> false
-            | While (_, body) -> false
+            | If (_, _, None) -> false
+            | While (_,_) -> false
             | _ -> false
         in
         not (has_return func.body)
