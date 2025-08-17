@@ -237,7 +237,6 @@ let rec gen_expr ctx expr =
         let store_result = gen_store_spill reg_dest actual_reg_dest in
         
         (* 只释放第二个寄存器，第一个寄存器被重用为结果寄存器 *)
-        let ctx = free_temp_reg ctx in
         let full_asm = 
           let parts = [asm1; asm2] @
                      (if load1 = "" then [] else [load1]) @
@@ -245,6 +244,7 @@ let rec gen_expr ctx expr =
                      [instr] @
                      (if store_result = "" then [] else [store_result]) in
           String.concat "\n" (List.filter (fun s -> s <> "") parts) in
+        let ctx = free_temp_reg ctx in
         (ctx, full_asm, reg_dest)
         
     | UnOp (op, e) ->
