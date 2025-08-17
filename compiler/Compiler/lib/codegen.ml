@@ -206,24 +206,34 @@ let rec gen_expr ctx expr =
             (ctx, Printf.sprintf "    lw %s, %d(sp)" reg offset, reg)
     | BinOp (e1, op, e2) ->
         let (ctx, asm1, reg1) = gen_expr ctx e1 in
-        (* 保存当前的 temp_regs_used，确保 reg1 不被重用 *)
-        let saved_temp_count = ctx.temp_regs_used in
+    
+        (* 关键：在计算 e2 之前，不要释放 reg1 的寄存器槽位 *)
+        (* 这样可以防止 e2 重用 reg1 的寄存器 *)
         let (ctx, asm2, reg2) = gen_expr ctx e2 in
-
-        let (ctx, reg2) = 
-        if reg1 = reg2 then
-            alloc_temp_reg ctx
-        else
-            (ctx, reg2)
+    
+        (* 检查是否发生了寄存器冲突 *)
+        let (ctx, reg2, extra_move) = 
+            if reg1 = reg2 && not (is_spill_reg reg1) then
+                (* 如果两个寄存器相同，需要分配一个新的寄存器 *)
+                let (ctx', new_reg) = alloc_temp_reg ctx in
+                let move_instr = 
+                    if is_spill_reg new_reg then
+                        Printf.sprintf "    mv t1, %s\n%s" reg2 (gen_store_spill new_reg "t1")
+                    else
+                        Printf.sprintf "    mv %s, %s" new_reg reg2
+                in
+                (ctx', new_reg, move_instr)
+            else
+                (ctx, reg2, "")
         in
-        
+    
         (* 处理溢出寄存器 *)
         let load1 = gen_load_spill reg1 "t0" in
         let load2 = gen_load_spill reg2 "t1" in
         let actual_reg1 = if is_spill_reg reg1 then "t0" else reg1 in
         let actual_reg2 = if is_spill_reg reg2 then "t1" else reg2 in
-        
-        (* 重用第一个寄存器作为目标寄存器，减少寄存器使用 *)
+    
+        (* 重用第一个寄存器作为目标寄存器 *)
         let reg_dest = reg1 in
         let actual_reg_dest = actual_reg1 in
         
@@ -244,15 +254,18 @@ let rec gen_expr ctx expr =
         in
         
         let store_result = gen_store_spill reg_dest actual_reg_dest in
-        
-        (* 只释放第二个寄存器，第一个寄存器被重用为结果寄存器 *)
+    
+        (* 组合汇编代码，包括可能的额外移动指令 *)
         let full_asm = 
-          let parts = [asm1; asm2] @
-                     (if load1 = "" then [] else [load1]) @
-                     (if load2 = "" then [] else [load2]) @
-                     [instr] @
-                     (if store_result = "" then [] else [store_result]) in
-          String.concat "\n" (List.filter (fun s -> s <> "") parts) in
+        let parts = [asm1; asm2] @
+                 (if extra_move = "" then [] else [extra_move]) @
+                 (if load1 = "" then [] else [load1]) @
+                 (if load2 = "" then [] else [load2]) @
+                 [instr] @
+                 (if store_result = "" then [] else [store_result]) in
+        String.concat "\n" (List.filter (fun s -> s <> "") parts) in
+    
+        (* 只释放第二个寄存器 *)
         let ctx = free_temp_reg ctx in
         (ctx, full_asm, reg_dest)
         
