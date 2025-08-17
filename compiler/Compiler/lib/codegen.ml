@@ -578,3 +578,16 @@ let gen_function func =
     let epilogue_asm = gen_epilogue ctx in
     
     prologue_asm ^ "\n" ^ save_params_asm ^ body_asm ^ epilogue_asm
+
+(* 编译单元代码生成 *)
+let compile cu =
+    let main_exists = ref false in
+    let funcs_asm = List.map (fun func ->
+        if func.name = "main" then main_exists := true;
+        gen_function func
+    ) cu in
+    
+    if not !main_exists then
+        failwith "Missing main function";
+    
+    String.concat "\n\n" funcs_asm
