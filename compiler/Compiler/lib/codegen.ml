@@ -206,7 +206,16 @@ let rec gen_expr ctx expr =
             (ctx, Printf.sprintf "    lw %s, %d(sp)" reg offset, reg)
     | BinOp (e1, op, e2) ->
         let (ctx, asm1, reg1) = gen_expr ctx e1 in
+        (* 保存当前的 temp_regs_used，确保 reg1 不被重用 *)
+        let saved_temp_count = ctx.temp_regs_used in
         let (ctx, asm2, reg2) = gen_expr ctx e2 in
+
+        let (ctx, reg2) = 
+        if reg1 = reg2 then
+            alloc_temp_reg ctx
+        else
+            (ctx, reg2)
+        in
         
         (* 处理溢出寄存器 *)
         let load1 = gen_load_spill reg1 "t0" in
