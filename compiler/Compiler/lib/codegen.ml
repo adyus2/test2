@@ -15,13 +15,13 @@ type context = {
     var_offset: (string * int) list list;
     next_temp: int;
     label_counter: int;
-    loop_stack: (string * string) list;
+    loop_stack: (string * string * string) list;  (* 修改为三元组 (begin_label, next_label, end_label) *)
     saved_regs: string list;
     reg_map: (string * reg_type) list;
     param_count: int;
     temp_regs_used: int;
     saved_area_size: int;
-    max_local_offset: int; (* 新增字段 *)
+    max_local_offset: int;
 }
 
 (* 创建新上下文 *)
@@ -451,6 +451,7 @@ and gen_stmt ctx stmt =
     
     | While (cond, body) ->
         let (ctx, begin_label) = fresh_label ctx "loop_begin" in
+        let (ctx, next_label) = fresh_label ctx "loop_next" in  (* 新增 next_label *)
         let (ctx, end_label) = fresh_label ctx "loop_end" in
         let (ctx, cond_asm, cond_reg) = gen_expr ctx cond in
         
@@ -458,7 +459,7 @@ and gen_stmt ctx stmt =
         let actual_cond_reg = if is_spill_reg cond_reg then "t0" else cond_reg in
         
         let loop_ctx = { ctx with 
-            loop_stack = (begin_label, end_label) :: ctx.loop_stack } in
+            loop_stack = (begin_label, next_label, end_label) :: ctx.loop_stack } in
         let (ctx_after_body, body_asm) = gen_stmt loop_ctx body in
         
         (* 仅弹出循环栈，保留其他字段 *)
@@ -471,6 +472,7 @@ and gen_stmt ctx stmt =
                      (if load_cond = "" then [] else [load_cond]) @
                      [Printf.sprintf "    beqz %s, %s" actual_cond_reg end_label] @
                      (if body_asm = "" then [] else [body_asm]) @
+                     [Printf.sprintf "%s:" next_label] @  (* 新增 next_label 标签 *)
                      [Printf.sprintf "    j %s" begin_label] @
                      [Printf.sprintf "%s:" end_label] in
           String.concat "\n" (List.filter (fun s -> s <> "") parts) in
@@ -478,14 +480,14 @@ and gen_stmt ctx stmt =
     
     | Break ->
         (match ctx.loop_stack with
-        | (_, end_label)::_ -> 
+        | (_, _, end_label)::_ -> 
             (ctx, Printf.sprintf "    j %s" end_label)
         | [] -> failwith "break outside loop")
     
     | Continue ->
         (match ctx.loop_stack with
-        | (begin_label, _)::_ -> 
-            (ctx, Printf.sprintf "    j %s" begin_label)
+        | (_, next_label, _)::_ ->  (* 跳转到 next_label *)
+            (ctx, Printf.sprintf "    j %s" next_label)
         | [] -> failwith "continue outside loop")
     
     | Return expr_opt ->
