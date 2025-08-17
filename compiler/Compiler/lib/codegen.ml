@@ -304,8 +304,8 @@ let rec gen_expr ctx expr =
                     (if move_instr = "" then [] else [move_instr]) in
                   move_args rest (index+1) new_parts
               | reg::rest ->
-                  (* 修复：栈参数存储位置从28字节开始(跳过临时寄存器保存区域) *)
-                  let stack_offset = 28 + (index - 8) * 4 in
+                  (* 修复：栈参数存储位置从0开始(跳过临时寄存器保存区域) *)
+                  let stack_offset = (index - 8) * 4 in
                   let load_src = gen_load_spill reg "t0" in
                   let actual_src = if is_spill_reg reg then "t0" else reg in
                   let store_instr = Printf.sprintf "    sw %s, %d(sp)" actual_src stack_offset in
@@ -560,9 +560,9 @@ let gen_function func =
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
                     (* 栈传递的参数 - 修复：确保正确的偏移量计算 *)
-                    (* 栈参数位于调用者栈帧，偏移 = 当前栈帧大小 + (参数索引-8)*4 *)
-                    let caller_arg_offset = total_size + (index - 8) * 4 in
-                    let load_asm = Printf.sprintf "    lw t0, %d(sp)" caller_arg_offset in
+                    (* 栈参数位于调用者栈帧，偏移 = (参数索引-8)*4 *)
+                    let stack_offset = (index - 8) * 4 in
+                    let load_asm = Printf.sprintf "    lw t0, %d(sp)" stack_offset in
                     let store_asm = Printf.sprintf "    sw t0, %d(sp)" offset in
                     gen_save rest (index + 1)
                         (asm ^ load_asm ^ "\n" ^ store_asm ^ "\n")
