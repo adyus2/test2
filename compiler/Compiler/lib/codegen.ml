@@ -556,7 +556,7 @@ let gen_function func =
                     gen_save rest (index + 1)
                         (asm ^ Printf.sprintf "    sw %s, %d(sp)\n" reg offset)
                 ) else (
-                    let stack_offset = ctx.frame_size + (index - 8) * 4 in
+                    let stack_offset = ctx.frame_size + 28 + (index - 8) * 4 in
                     let load_asm = Printf.sprintf "    lw t0, %d(sp)" stack_offset in
                     let store_asm = Printf.sprintf "    sw t0, %d(sp)" offset in
                     gen_save rest (index + 1)
